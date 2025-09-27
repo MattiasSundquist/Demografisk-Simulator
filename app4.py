@@ -512,7 +512,7 @@ with tab1:
         
         selected_groups_code = c1.multiselect("Välj grupper att visa:", options=options_for_multiselect.keys(), default=default_groups_code, format_func=lambda code: options_for_multiselect[code])
         
-        combine_groups = c2.checkbox("Slå ihop grupper med utländsk bakgrund")
+        combine_groups = c2.checkbox("Slå ihop grupper med utländsk bakgrund", True)
         plot_df = display_df.copy().rename(columns=UI_LABELS)
         
         if combine_groups:
@@ -781,3 +781,4 @@ with tab5:
         - **Källbaserade prognoser:** Standardinställningarna för framtiden är inte godtyckliga, utan baseras på SCB:s officiella befolkningsframskrivning från 2024.
         - **Transparenta antaganden:** Parametrar som är rena modellantaganden är tydligt markerade som sådana, med förklaringar till logiken bakom dem.
         """)
+
