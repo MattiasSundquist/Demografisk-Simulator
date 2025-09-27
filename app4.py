@@ -3,54 +3,84 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 
-# --- SIDANS GRUNDINSTÄLLNINGAR ---
-st.set_page_config(page_title="Demografisk Simulator 3.3", layout="wide")
+# --- SIDANS GRUNDINSTÄLLNINGAR OCH TITEL ---
+st.set_page_config(page_title="Demografisk Simulator 4.0", layout="wide")
 
-# --- DEL 2: AGENT-BASERAD MODELL - Huvudparametrar ---
-def get_model_v2_params():
+# --- MODELLKONSTANTER ---
+# Genom att definiera "magiska nummer" här blir koden mer läsbar och enklare att underhålla.
+ASSIMILATION_THRESHOLD = 0.999  # Andel som krävs för att klassas med "Svensk bakgrund"
+FERTILITY_AGE_MIN = 15
+FERTILITY_AGE_MAX = 49
+PARTNER_AGE_MIN = 18
+PARTNER_AGE_MAX = 60
+IMMIGRANT_AGE_MEAN = 28
+IMMIGRANT_AGE_STD_DEV = 8
+
+# --- MODELLENS STANDARDPARAMETRAR ---
+def get_default_parameters():
+    """Returnerar en strukturerad ordbok med alla standardparametrar för modellen."""
     params = {
-        "start_year": 1960, "end_year": 2024,
-        "base_assimilation_rate": 0.005,
-        "mixing_factor_inhemsk": {"start_year": 1960, "start_value": 0.10, "end_year": 2019, "end_value": 0.25},
-        "mixing_factor_utlandsk": {"start_year": 1960, "start_value": 0.25, "end_year": 2019, "end_value": 0.10},
-        "fertility_bonuses": {
-            "Svensk": 0.0, "Scandinavieninvandring": 0.0, "Europainvandring": 0.15, 
-            "Balkan/LATAM-invandring": 0.45, "MENA-invandring": 1.2, "Övriga": 0.35
+        "simulation": {
+            "start_year": 1960,
+            "end_year": 2024
         },
-        "migration_waves": {
-            "1960-1980": {"Europainvandring": 0.30, "Scandinavieninvandring": 0.30, "Balkan/LATAM-invandring": 0.25, "MENA-invandring": 0.05, "Övriga": 0.10},
-            "1981-2000": {"Europainvandring": 0.20, "Scandinavieninvandring": 0.20, "Balkan/LATAM-invandring": 0.40, "MENA-invandring": 0.10, "Övriga": 0.10},
-            "2001-2024": {"Europainvandring": 0.10, "Scandinavieninvandring": 0.10, "Balkan/LATAM-invandring": 0.10, "MENA-invandring": 0.60, "Övriga": 0.10},
+        "assimilation": {
+            "base_rate": 0.005,
+            "strength_multiplier": 1.0,
+            "start_shares": {
+                "Scandinavieninvandring": 0.75, "Europainvandring": 0.50, 
+                "Balkan/LATAM-invandring": 0.25, "MENA-invandring": 0.05, "Övriga": 0.10
+            },
+            "rate_multipliers": {
+                "Scandinavieninvandring": 7.0, "Europainvandring": 5.0, 
+                "Balkan/LATAM-invandring": 3.0, "MENA-invandring": 1.0, "Övriga": 2.0
+            }
         },
-        "assimilation_start_share": {
-            "Scandinavieninvandring": 0.75, "Europainvandring": 0.50, "Balkan/LATAM-invandring": 0.25, "MENA-invandring": 0.05, "Övriga": 0.10
+        "fertility": {
+            "bonuses": {
+                "Svensk": 0.0, "Scandinavieninvandring": 0.0, "Europainvandring": 0.15, 
+                "Balkan/LATAM-invandring": 0.45, "MENA-invandring": 1.2, "Övriga": 0.35
+            }
         },
-        "assimilation_rate_multiplier": {
-            "Scandinavieninvandring": 7.0, "Europainvandring": 5.0, "Balkan/LATAM-invandring": 3.0, "MENA-invandring": 1.0, "Övriga": 2.0
+        "migration": {
+            "historical_waves": {
+                "1960-1980": {"Europainvandring": 0.30, "Scandinavieninvandring": 0.30, "Balkan/LATAM-invandring": 0.25, "MENA-invandring": 0.05, "Övriga": 0.10},
+                "1981-2000": {"Europainvandring": 0.20, "Scandinavieninvandring": 0.20, "Balkan/LATAM-invandring": 0.40, "MENA-invandring": 0.10, "Övriga": 0.10},
+                "2001-2024": {"Europainvandring": 0.10, "Scandinavieninvandring": 0.10, "Balkan/LATAM-invandring": 0.10, "MENA-invandring": 0.60, "Övriga": 0.10},
+            },
+            "emigration_bias": 5.0
         },
-        "le_male_2024": 82.29, "le_female_2024": 85.35, "cdr_2024": 9.0,
-        "enable_tipping_point_assimilation": True, "assimilation_tipping_point": 0.50, "negative_assimilation_strength": 1.0
+        "demographics": {
+            "le_male_2024": 82.29,
+            "le_female_2024": 85.35,
+            "cdr_2024": 9.0
+        },
+        "mixing": {
+            "swedish_background_mother": {"start_year": 1960, "start_value": 0.10, "end_year": 2019, "end_value": 0.25},
+            "foreign_background_mother": {"start_year": 1960, "start_value": 0.25, "end_year": 2019, "end_value": 0.10}
+        }
     }
     return params
 
-# --- INITIERA SESSION STATE MED STANDARDVÄRDEN ---
+# --- INITIERA SESSION STATE ---
 if 'edited_params' not in st.session_state:
-    st.session_state['edited_params'] = get_model_v2_params()
+    st.session_state['edited_params'] = get_default_parameters()
 
 if 'future_migration_composition' not in st.session_state:
-    st.session_state['future_migration_composition'] = st.session_state['edited_params']["migration_waves"]["2001-2024"].copy()
+    st.session_state['future_migration_composition'] = st.session_state['edited_params']["migration"]["historical_waves"]["2001-2024"].copy()
 
 if 'forecast_settings' not in st.session_state:
+    # Uppdaterar till de senaste SCB-prognosvärdena som standard
     st.session_state['forecast_settings'] = {
-        'forecast_end_year': 2070, 'tfr': 1.65, 'target_le_male': 86.0, 'target_le_female': 88.0,
+        'forecast_end_year': 2070, 'tfr': 1.59, 'target_le_male': 85.3, 'target_le_female': 87.7,
         'cdr_target_2050': 8.8, 'immigrant_composition': st.session_state['future_migration_composition'],
-        'migration_model': 'Absoluta tal', 'annual_immigrants': 80000, 'annual_emigrants': 60000,
+        'migration_model': 'Procent av befolkningen', 'annual_immigrants': 80000, 'annual_emigrants': 60000,
         'immigration_rate': 0.0075, 'emigration_rate': 0.0057
     }
 
-# --- DEL 1: LADDNING AV SCB-DATA ---
+# --- DATALADDNING ---
 @st.cache_data
-def load_and_prepare_scb_data(filepath, max_year):
+def load_scb_data(filepath, max_year):
     df = pd.read_csv(filepath, index_col=0, na_values="..")
     df = df.transpose(); df.index = pd.to_numeric(df.index)
     for col in df.columns:
@@ -66,24 +96,25 @@ def load_and_prepare_scb_data(filepath, max_year):
 # --- HJÄLPFUNKTIONER FÖR SIMULERINGEN ---
 def perform_aging_and_assimilation(population, year, params):
     population.loc[population['is_alive'], 'age'] += 1
-    
     live_pop_mask = population['is_alive']
     if live_pop_mask.sum() == 0: return population
 
-    share_inhemsk = (live_pop_mask & (population['swedish_share'] >= 0.999)).sum() / live_pop_mask.sum()
+    # Bättre variabelnamn för tydlighet.
+    proportion_swedish_background = (live_pop_mask & (population['swedish_share'] >= ASSIMILATION_THRESHOLD)).sum() / live_pop_mask.sum()
+    origin_assimilation_multiplier = population['ethnic_origin'].map(params['assimilation']['rate_multipliers']).fillna(1.0)
     
-    rate_multiplier = population['ethnic_origin'].map(params['assimilation_rate_multiplier']).fillna(1.0)
+    # Den nya, enhetliga och linjära assimileringsmodellen.
+    dynamic_assimilation_factor = (proportion_swedish_background * 2) - 1
+    assimilation_strength = params['assimilation']['strength_multiplier']
     
-    if params.get("enable_tipping_point_assimilation", False) and share_inhemsk < params["assimilation_tipping_point"]:
-        # --- SCENARIO 1: NEGATIV ASSIMILERING (under tröskeln) ---
-        negative_base_rate = params['base_assimilation_rate'] * params["negative_assimilation_strength"]
-        assimilation_change = -1 * negative_base_rate * (1.0 - population['swedish_share']) * rate_multiplier
-    else:
-        # --- SCENARIO 2: STANDARD POSITIV ASSIMILERING (i alla andra fall) ---
-        dynamic_assimilation_rate = params['base_assimilation_rate'] * share_inhemsk
-        assimilation_change = dynamic_assimilation_rate * population['swedish_share'] * rate_multiplier
+    assimilation_change = (params['assimilation']['base_rate'] * 
+                           dynamic_assimilation_factor * 
+                           assimilation_strength *
+                           population['swedish_share'] * 
+                           origin_assimilation_multiplier)
 
-    population.loc[live_pop_mask & (population['swedish_share'] > 0), 'swedish_share'] += assimilation_change
+    change_mask = live_pop_mask & (population['swedish_share'] > 0) & (population['swedish_share'] < 1.0)
+    population.loc[change_mask, 'swedish_share'] += assimilation_change
     population['swedish_share'] = population['swedish_share'].clip(0.0, 1.0)
     return population
 
@@ -105,19 +136,21 @@ def perform_deaths(population, scb_data_year, scale_factor):
     return population, events
 
 def perform_deaths_forecast(population, year, scale_factor, params, forecast_settings):
-    # (Denna funktion är oförändrad från föregående version)
     events = []
     live_pop_indices = population.index[population['is_alive']]
     if live_pop_indices.empty: return population, events
 
-    le_m_2024, le_f_2024 = params['le_male_2024'], params['le_female_2024']
-    target_le_m_2050, target_le_f_2050 = forecast_settings['target_le_male'], forecast_settings['target_le_female']
-    interp_start_year_le, interp_end_year_le = params['end_year'], 2050
+    le_m_2024 = params['demographics']['le_male_2024']
+    le_f_2024 = params['demographics']['le_female_2024']
+    target_le_m_2050 = forecast_settings['target_le_male']
+    target_le_f_2050 = forecast_settings['target_le_female']
+    interp_start_year_le = params['simulation']['end_year']
+    interp_end_year_le = 2050
     
     if year <= interp_end_year_le:
-        interp_factor_le = (year - interp_start_year_le) / (interp_end_year_le - interp_start_year_le) if (interp_end_year_le - interp_start_year_le) > 0 else 0
-        current_le_m = le_m_2024 + (target_le_m_2050 - le_m_2024) * interp_factor_le
-        current_le_f = le_f_2024 + (target_le_f_2050 - le_f_2024) * interp_factor_le
+        interp_factor = (year - interp_start_year_le) / (interp_end_year_le - interp_start_year_le) if (interp_end_year_le - interp_start_year_le) > 0 else 0
+        current_le_m = le_m_2024 + (target_le_m_2050 - le_m_2024) * interp_factor
+        current_le_f = le_f_2024 + (target_le_f_2050 - le_f_2024) * interp_factor
     else:
         current_le_m, current_le_f = target_le_m_2050, target_le_f_2050
 
@@ -130,8 +163,10 @@ def perform_deaths_forecast(population, year, scale_factor, params, forecast_set
     mortality_rate_adjusted.loc[male_mask] *= adj_factor_male_le
     mortality_rate_adjusted.loc[~male_mask] *= adj_factor_female_le
 
-    cdr_2024, cdr_2050 = params['cdr_2024'], forecast_settings['cdr_target_2050']
-    interp_start_year_cdr, interp_end_year_cdr = params['end_year'], 2050
+    cdr_2024 = params['demographics']['cdr_2024']
+    cdr_2050 = forecast_settings['cdr_target_2050']
+    interp_start_year_cdr = params['simulation']['end_year']
+    interp_end_year_cdr = 2050
     if year <= interp_end_year_cdr:
         interp_factor_cdr = (year - interp_start_year_cdr) / (interp_end_year_cdr - interp_start_year_cdr) if (interp_end_year_cdr - interp_start_year_cdr) > 0 else 0
         current_cdr = cdr_2024 + (cdr_2050 - cdr_2024) * interp_factor_cdr
@@ -154,44 +189,46 @@ def perform_deaths_forecast(population, year, scale_factor, params, forecast_set
     return population, events
 
 def perform_births(population, scb_data_year, scale_factor, params, next_agent_id):
-    # (Denna funktion är oförändrad från föregående version)
     events, new_babies_list = [], []
     live_pop_mask = population['is_alive']
-    mothers = population[live_pop_mask & (population['sex'] == 1) & (population['age'] >= 15) & (population['age'] <= 49)]
+    mothers = population[live_pop_mask & (population['sex'] == 1) & (population['age'] >= FERTILITY_AGE_MIN) & (population['age'] <= FERTILITY_AGE_MAX)]
 
     if not mothers.empty:
         scb_births_scaled = scb_data_year["Födda Births"] / scale_factor
-        fertility_bonus = mothers['ethnic_origin'].map(params['fertility_bonuses']).fillna(0)
+        fertility_bonus = mothers['ethnic_origin'].map(params['fertility']['bonuses']).fillna(0)
         base_fertility = 1.0 - (0.8 * mothers['swedish_share'])
         birth_potential = (1 + (fertility_bonus * base_fertility))
         birth_prob_factor = scb_births_scaled / birth_potential.sum() if birth_potential.sum() > 0 else 0
         birth_prob = birth_potential * birth_prob_factor
         gives_birth = np.random.rand(len(mothers)) < birth_prob
         actual_mothers = mothers[gives_birth]
-        men = population[live_pop_mask & (population['sex'] == 0) & (population['age'] >= 18) & (population['age'] <= 60)]
+        men = population[live_pop_mask & (population['sex'] == 0) & (population['age'] >= PARTNER_AGE_MIN) & (population['age'] <= PARTNER_AGE_MAX)]
 
         if not actual_mothers.empty and not men.empty:
             year = scb_data_year.name
-            p_inhemsk, p_utlandsk = params['mixing_factor_inhemsk'], params['mixing_factor_utlandsk']
-            mix_inhemsk = np.interp(year, [p_inhemsk['start_year'], p_inhemsk['end_year']], [p_inhemsk['start_value'], p_inhemsk['end_value']])
-            mix_utlandsk = np.interp(year, [p_utlandsk['start_year'], p_utlandsk['end_year']], [p_utlandsk['start_value'], p_utlandsk['end_value']])
+            mixing_swedish = params['mixing']['swedish_background_mother']
+            mixing_foreign = params['mixing']['foreign_background_mother']
             
-            men_inhemska = men[men['swedish_share'] == 1.0]
-            men_utlandsk_bakgrund = men[men['swedish_share'] < 1.0]
+            mix_factor_swedish = np.interp(year, [mixing_swedish['start_year'], mixing_swedish['end_year']], [mixing_swedish['start_value'], mixing_swedish['end_value']])
+            mix_factor_foreign = np.interp(year, [mixing_foreign['start_year'], mixing_foreign['end_year']], [mixing_foreign['start_value'], mixing_foreign['end_value']])
+            
+            men_swedish_background = men[men['swedish_share'] == 1.0]
+            men_foreign_background = men[men['swedish_share'] < 1.0]
 
             for _, mother in actual_mothers.iterrows():
                 father = None
                 if mother['swedish_share'] == 1.0:
-                    if np.random.rand() < mix_inhemsk and not men_utlandsk_bakgrund.empty: father = men_utlandsk_bakgrund.sample(1).iloc[0]
-                    elif not men_inhemska.empty: father = men_inhemska.sample(1).iloc[0]
+                    if np.random.rand() < mix_factor_swedish and not men_foreign_background.empty: father = men_foreign_background.sample(1).iloc[0]
+                    elif not men_swedish_background.empty: father = men_swedish_background.sample(1).iloc[0]
                 else:
-                    if np.random.rand() < mix_utlandsk and not men_inhemska.empty: father = men_inhemska.sample(1).iloc[0]
-                    elif not men_utlandsk_bakgrund.empty: father = men_utlandsk_bakgrund.sample(1).iloc[0]
+                    if np.random.rand() < mix_factor_foreign and not men_swedish_background.empty: father = men_swedish_background.sample(1).iloc[0]
+                    elif not men_foreign_background.empty: father = men_foreign_background.sample(1).iloc[0]
                 
                 if father is None: father = men.sample(1).iloc[0]
 
                 child_share = (mother['swedish_share'] + father['swedish_share']) / 2
-                child_origin = mother['ethnic_origin'] if mother['swedish_share'] < father['swedish_share'] else father['ethnic_origin']
+                child_origin = np.random.choice([mother['ethnic_origin'], father['ethnic_origin']]) if mother['ethnic_origin'] != father['ethnic_origin'] else mother['ethnic_origin']
+                
                 baby = {'id': next_agent_id, 'age': 0, 'sex': np.random.randint(0, 2), 'is_alive': True, 'swedish_share': child_share, 'ethnic_origin': child_origin, 'birth_year': year, 'parent1_id': father['id'], 'parent2_id': mother['id'], 'is_immigrant': False}
                 new_babies_list.append(baby)
                 events.append({'year': year, 'event': 'Födsel', 'agent_id': next_agent_id, 'mother_id': mother['id'], 'father_id': father['id']})
@@ -202,19 +239,18 @@ def perform_births(population, scb_data_year, scale_factor, params, next_agent_i
     return population, events, next_agent_id, len(new_babies_list)
 
 def perform_births_forecast(population, year, scale_factor, params, forecast_settings, next_agent_id):
-    # (Denna funktion är oförändrad från föregående version)
     events, new_babies_list = [], []
     live_pop_mask = population['is_alive']
-    mothers = population[live_pop_mask & (population['sex'] == 1) & (population['age'] >= 15) & (population['age'] <= 49)]
+    mothers = population[live_pop_mask & (population['sex'] == 1) & (population['age'] >= FERTILITY_AGE_MIN) & (population['age'] <= FERTILITY_AGE_MAX)]
     if mothers.empty: return population, events, next_agent_id, 0
 
     num_fertile_women_full_scale = len(mothers) * scale_factor
-    annual_birth_rate_per_woman = forecast_settings['tfr'] / 35.0
+    annual_birth_rate_per_woman = forecast_settings['tfr'] / (FERTILITY_AGE_MAX - FERTILITY_AGE_MIN + 1)
     expected_births_full_scale = num_fertile_women_full_scale * annual_birth_rate_per_woman
     expected_births_scaled = int(round(expected_births_full_scale / scale_factor))
     if expected_births_scaled <= 0: return population, events, next_agent_id, 0
 
-    fertility_bonus = mothers['ethnic_origin'].map(params['fertility_bonuses']).fillna(0)
+    fertility_bonus = mothers['ethnic_origin'].map(params['fertility']['bonuses']).fillna(0)
     base_fertility = 1.0 - (0.8 * mothers['swedish_share'])
     birth_potential = (1 + (fertility_bonus * base_fertility))
     birth_prob_factor = expected_births_scaled / birth_potential.sum() if birth_potential.sum() > 0 else 0
@@ -222,25 +258,29 @@ def perform_births_forecast(population, year, scale_factor, params, forecast_set
     
     gives_birth = np.random.rand(len(mothers)) < birth_prob
     actual_mothers = mothers[gives_birth]
-    men = population[live_pop_mask & (population['sex'] == 0) & (population['age'] >= 18) & (population['age'] <= 60)]
+    men = population[live_pop_mask & (population['sex'] == 0) & (population['age'] >= PARTNER_AGE_MIN) & (population['age'] <= PARTNER_AGE_MAX)]
 
     if not actual_mothers.empty and not men.empty:
-        mix_inhemsk, mix_utlandsk = params['mixing_factor_inhemsk']['end_value'], params['mixing_factor_utlandsk']['end_value']
-        men_inhemska, men_utlandsk_bakgrund = men[men['swedish_share'] == 1.0], men[men['swedish_share'] < 1.0]
+        mix_factor_swedish = params['mixing']['swedish_background_mother']['end_value']
+        mix_factor_foreign = params['mixing']['foreign_background_mother']['end_value']
+        
+        men_swedish_background = men[men['swedish_share'] == 1.0]
+        men_foreign_background = men[men['swedish_share'] < 1.0]
 
         for _, mother in actual_mothers.iterrows():
             father = None
             if mother['swedish_share'] == 1.0: 
-                if np.random.rand() < mix_inhemsk and not men_utlandsk_bakgrund.empty: father = men_utlandsk_bakgrund.sample(1).iloc[0]
-                elif not men_inhemska.empty: father = men_inhemska.sample(1).iloc[0]
+                if np.random.rand() < mix_factor_swedish and not men_foreign_background.empty: father = men_foreign_background.sample(1).iloc[0]
+                elif not men_swedish_background.empty: father = men_swedish_background.sample(1).iloc[0]
             else: 
-                if np.random.rand() < mix_utlandsk and not men_inhemska.empty: father = men_inhemska.sample(1).iloc[0]
-                elif not men_utlandsk_bakgrund.empty: father = men_utlandsk_bakgrund.sample(1).iloc[0]
+                if np.random.rand() < mix_factor_foreign and not men_swedish_background.empty: father = men_swedish_background.sample(1).iloc[0]
+                elif not men_foreign_background.empty: father = men_foreign_background.sample(1).iloc[0]
             
             if father is None: father = men.sample(1).iloc[0]
 
             child_share = (mother['swedish_share'] + father['swedish_share']) / 2
-            child_origin = mother['ethnic_origin'] if mother['swedish_share'] < father['swedish_share'] else father['ethnic_origin']
+            child_origin = np.random.choice([mother['ethnic_origin'], father['ethnic_origin']]) if mother['ethnic_origin'] != father['ethnic_origin'] else mother['ethnic_origin']
+            
             baby = {'id': next_agent_id, 'age': 0, 'sex': np.random.randint(0, 2), 'is_alive': True, 'swedish_share': child_share, 'ethnic_origin': child_origin, 'birth_year': year, 'parent1_id': father['id'], 'parent2_id': mother['id'], 'is_immigrant': False}
             new_babies_list.append(baby)
             events.append({'year': year, 'event': 'Födsel', 'agent_id': next_agent_id, 'mother_id': mother['id'], 'father_id': father['id']})
@@ -251,21 +291,22 @@ def perform_births_forecast(population, year, scale_factor, params, forecast_set
     return population, events, next_agent_id, len(new_babies_list)
 
 def perform_migration(population, scb_data_year, scale_factor, params, next_agent_id):
-    # (Denna funktion är oförändrad från föregående version)
     events = []
     # Invandring
     scb_immigrants_scaled = int(scb_data_year["Invandringar In-migration"] / scale_factor)
     if scb_immigrants_scaled > 0:
-        wave_key = next((p for p in params['migration_waves'] if int(p.split('-')[0]) <= scb_data_year.name <= int(p.split('-')[1])), "2001-2024") 
-        wave = params["migration_waves"].get(wave_key, params["migration_waves"]["2001-2024"]) 
+        waves = params['migration']['historical_waves']
+        wave_key = next((p for p in waves if int(p.split('-')[0]) <= scb_data_year.name <= int(p.split('-')[1])), "2001-2024")
+        wave = waves.get(wave_key, waves["2001-2024"])
         origins, probs = list(wave.keys()), list(wave.values())
+        
         probs_sum = sum(probs)
         if probs_sum == 0: probs = [1.0/len(origins)]*len(origins)
         else: probs = [p / probs_sum for p in probs]
 
         immigrant_origins = np.random.choice(origins, size=scb_immigrants_scaled, p=probs)
-        immigrant_ages = np.random.normal(loc=28, scale=8, size=scb_immigrants_scaled).astype(int).clip(0, 80)
-        start_shares = pd.Series(immigrant_origins).map(params['assimilation_start_share']).fillna(0.01).values
+        immigrant_ages = np.random.normal(loc=IMMIGRANT_AGE_MEAN, scale=IMMIGRANT_AGE_STD_DEV, size=scb_immigrants_scaled).astype(int).clip(0, 80)
+        start_shares = pd.Series(immigrant_origins).map(params['assimilation']['start_shares']).fillna(0.01).values
 
         immigrants_df = pd.DataFrame({'age': immigrant_ages, 'sex': np.random.randint(0, 2, size=scb_immigrants_scaled), 'is_immigrant': True, 'is_alive': True, 'swedish_share': start_shares, 'ethnic_origin': immigrant_origins, 'birth_year': scb_data_year.name - immigrant_ages, 'parent1_id': -1, 'parent2_id': -1})
         immigrants_df['id'] = np.arange(next_agent_id, next_agent_id + scb_immigrants_scaled)
@@ -277,18 +318,20 @@ def perform_migration(population, scb_data_year, scale_factor, params, next_agen
     scb_emigrants_scaled = int(scb_data_year["Utvandringar Out-migration"] / scale_factor)
     live_indices = population.index[population['is_alive']]
     if scb_emigrants_scaled > 0 and len(live_indices) > scb_emigrants_scaled:
-        emigrant_indices = np.random.choice(live_indices, size=scb_emigrants_scaled, replace=False)
+        emigration_bias = params['migration']['emigration_bias']
+        emigration_weights = 1 + (1 - population.loc[live_indices, 'swedish_share']) * (emigration_bias - 1)
+        probabilities = emigration_weights / emigration_weights.sum()
+        emigrant_indices = np.random.choice(live_indices, size=scb_emigrants_scaled, replace=False, p=probabilities.values)
         population.loc[emigrant_indices, 'is_alive'] = False
         for agent_id in population.loc[emigrant_indices, 'id']: events.append({'year': scb_data_year.name, 'event': 'Utvandring', 'agent_id': agent_id})
     return population, events, next_agent_id
 
 def perform_migration_forecast(population, year, scale_factor, params, forecast_settings, next_agent_id):
-    # (Denna funktion är oförändrad från föregående version)
     events = []
     
-    if forecast_settings.get('migration_model') == 'Procent av befolkningen':
+    if forecast_settings['migration_model'] == 'Procent av befolkningen':
         total_live_pop_full_scale = population[population['is_alive']].shape[0] * scale_factor
-        num_immigrants_full_scale = total_live_pop_full_scale * forecast_settings.get('immigration_rate', 0.0)
+        num_immigrants_full_scale = total_live_pop_full_scale * forecast_settings['immigration_rate']
         num_immigrants_scaled = int(round(num_immigrants_full_scale / scale_factor))
     else:
         num_immigrants_scaled = int(forecast_settings['annual_immigrants'] / scale_factor)
@@ -301,8 +344,8 @@ def perform_migration_forecast(population, year, scale_factor, params, forecast_
         else: probs = [p / probs_sum for p in probs] 
 
         immigrant_origins = np.random.choice(origins, size=num_immigrants_scaled, p=probs)
-        immigrant_ages = np.random.normal(loc=28, scale=8, size=num_immigrants_scaled).astype(int).clip(0, 80)
-        start_shares = pd.Series(immigrant_origins).map(params['assimilation_start_share']).fillna(0.01).values
+        immigrant_ages = np.random.normal(loc=IMMIGRANT_AGE_MEAN, scale=IMMIGRANT_AGE_STD_DEV, size=num_immigrants_scaled).astype(int).clip(0, 80)
+        start_shares = pd.Series(immigrant_origins).map(params['assimilation']['start_shares']).fillna(0.01).values
 
         immigrants_df = pd.DataFrame({'age': immigrant_ages, 'sex': np.random.randint(0, 2, size=num_immigrants_scaled), 'is_immigrant': True, 'is_alive': True, 'swedish_share': start_shares, 'ethnic_origin': immigrant_origins, 'birth_year': year - immigrant_ages, 'parent1_id': -1, 'parent2_id': -1})
         immigrants_df['id'] = np.arange(next_agent_id, next_agent_id + num_immigrants_scaled)
@@ -310,81 +353,131 @@ def perform_migration_forecast(population, year, scale_factor, params, forecast_
         for _, imm in immigrants_df.iterrows(): events.append({'year': year, 'event': 'Invandring', 'agent_id': imm['id'], 'age_at_arrival': imm['age']})
         population = pd.concat([population, immigrants_df], ignore_index=True)
 
-    if forecast_settings.get('migration_model') == 'Procent av befolkningen':
+    if forecast_settings['migration_model'] == 'Procent av befolkningen':
         total_live_pop_full_scale = population[population['is_alive']].shape[0] * scale_factor 
-        num_emigrants_full_scale = total_live_pop_full_scale * forecast_settings.get('emigration_rate', 0.0)
+        num_emigrants_full_scale = total_live_pop_full_scale * forecast_settings['emigration_rate']
         num_emigrants_scaled = int(round(num_emigrants_full_scale / scale_factor))
     else:
         num_emigrants_scaled = int(forecast_settings['annual_emigrants'] / scale_factor)
         
     live_indices = population.index[population['is_alive']]
     if num_emigrants_scaled > 0 and len(live_indices) > num_emigrants_scaled:
-        emigrant_indices = np.random.choice(live_indices, size=num_emigrants_scaled, replace=False)
+        emigration_bias = params['migration']['emigration_bias']
+        emigration_weights = 1 + (1 - population.loc[live_indices, 'swedish_share']) * (emigration_bias - 1)
+        probabilities = emigration_weights / emigration_weights.sum()
+        emigrant_indices = np.random.choice(live_indices, size=num_emigrants_scaled, replace=False, p=probabilities.values)
         population.loc[emigrant_indices, 'is_alive'] = False
         for agent_id in population.loc[emigrant_indices, 'id']: events.append({'year': year, 'event': 'Utvandring', 'agent_id': agent_id})
     return population, events, next_agent_id
 
-def log_yearly_summary(year, population, scb_data_year, num_new_babies):
+def create_yearly_summary(year, population, scb_data_year, num_new_babies):
+    """Skapar en sammanfattning för ett historiskt år med jämförelse mot SCB-data."""
     final_live_pop = population[population['is_alive']]
-    invandrare_mask = final_live_pop['is_immigrant'] == True
-    inhemsk_mask = final_live_pop['swedish_share'] >= 0.999
-    invandrarbakgrund_mask = (~invandrare_mask) & (~inhemsk_mask)
-    return {'År': year, 'Sim_Totalpop': len(final_live_pop), 'SCB_Totalpop': scb_data_year["Folkmängd 31 december Population on 31 December"], 'Inhemsk': inhemsk_mask.sum(), 'Invandrarbakgrund': invandrarbakgrund_mask.sum(), 'Invandrare': invandrare_mask.sum(), 'Sim_Födda': num_new_babies, 'SCB_Födda': scb_data_year["Födda Births"]}
+    first_generation_mask = final_live_pop['is_immigrant'] == True
+    swedish_background_mask = final_live_pop['swedish_share'] >= ASSIMILATION_THRESHOLD
+    later_generations_mask = (~first_generation_mask) & (~swedish_background_mask)
+    return {
+        'Year': year, 
+        'Simulated_Population': len(final_live_pop), 
+        'Actual_Population_SCB': scb_data_year["Folkmängd 31 december Population on 31 December"], 
+        'Swedish_Background': swedish_background_mask.sum(), 
+        'Later_Generations': later_generations_mask.sum(), 
+        'First_Generation': first_generation_mask.sum(), 
+        'Simulated_Births': num_new_babies, 
+        'Actual_Births_SCB': scb_data_year["Födda Births"]
+    }
 
-def log_yearly_summary_forecast(year, population, num_new_babies):
+def create_forecast_summary(year, population, num_new_babies):
+    """Skapar en sammanfattning för ett prognosår utan SCB-data."""
     final_live_pop = population[population['is_alive']]
-    invandrare_mask = final_live_pop['is_immigrant'] == True
-    inhemsk_mask = final_live_pop['swedish_share'] >= 0.999
-    invandrarbakgrund_mask = (~invandrare_mask) & (~inhemsk_mask)
-    return {'År': year, 'Sim_Totalpop': len(final_live_pop), 'SCB_Totalpop': np.nan, 'Inhemsk': inhemsk_mask.sum(), 'Invandrarbakgrund': invandrarbakgrund_mask.sum(), 'Invandrare': invandrare_mask.sum(), 'Sim_Födda': num_new_babies, 'SCB_Födda': np.nan}
+    first_generation_mask = final_live_pop['is_immigrant'] == True
+    swedish_background_mask = final_live_pop['swedish_share'] >= ASSIMILATION_THRESHOLD
+    later_generations_mask = (~first_generation_mask) & (~swedish_background_mask)
+    return {
+        'Year': year, 
+        'Simulated_Population': len(final_live_pop), 
+        'Actual_Population_SCB': np.nan, 
+        'Swedish_Background': swedish_background_mask.sum(), 
+        'Later_Generations': later_generations_mask.sum(), 
+        'First_Generation': first_generation_mask.sum(), 
+        'Simulated_Births': num_new_babies, 
+        'Actual_Births_SCB': np.nan
+    }
 
 # --- HUVUDFUNKTION FÖR SIMULERING ---
 def run_abm_simulation(_scb_data, params, scale_factor, forecast_settings):
-    # (Denna funktion är oförändrad från föregående version)
-    total_pop_real = _scb_data.loc[1960, "Folkmängd 31 december Population on 31 December"]
+    start_year = params['simulation']['start_year']
+    total_pop_real = _scb_data.loc[start_year, "Folkmängd 31 december Population on 31 December"]
     num_agents = int(total_pop_real / scale_factor)
+    
     ages = np.arange(100); dist = np.exp(-ages * 0.03); dist /= dist.sum()
     agent_ages = np.random.choice(ages, size=num_agents, p=dist)
-    population = pd.DataFrame({'age': agent_ages, 'sex': np.random.choice([0, 1], size=num_agents), 'is_alive': True, 'swedish_share': 1.0, 'ethnic_origin': 'Svensk', 'parent1_id': -1, 'parent2_id': -1, 'is_immigrant': False})
-    population['id'] = population.index.values
-    population['birth_year'] = params['start_year'] - population['age']
     
-    simulation_log, event_log = [], []
+    population = pd.DataFrame({
+        'id': range(num_agents),
+        'age': agent_ages, 
+        'sex': np.random.choice([0, 1], size=num_agents), 
+        'is_alive': True, 
+        'swedish_share': 1.0, 
+        'ethnic_origin': 'Svensk', 
+        'parent1_id': -1, 
+        'parent2_id': -1, 
+        'is_immigrant': False,
+        'birth_year': start_year - agent_ages
+    })
+    
+    simulation_summary, event_log = [], []
     progress_bar = st.progress(0, "Startar simulering...")
     next_agent_id = len(population)
 
-    total_years = forecast_settings['forecast_end_year'] - params['start_year'] + 1
-    for i, year in enumerate(range(params['start_year'], forecast_settings['forecast_end_year'] + 1)):
-        if year <= params['end_year']: 
+    end_year_historical = params['simulation']['end_year']
+    end_year_forecast = forecast_settings['forecast_end_year']
+    total_years = end_year_forecast - start_year + 1
+
+    for i, year in enumerate(range(start_year, end_year_forecast + 1)):
+        if year <= end_year_historical: 
             scb_data_year = _scb_data.loc[year]
             population = perform_aging_and_assimilation(population, year, params)
             population, d_events = perform_deaths(population, scb_data_year, scale_factor)
             population, b_events, next_agent_id, num_babies = perform_births(population, scb_data_year, scale_factor, params, next_agent_id)
             population, m_events, next_agent_id = perform_migration(population, scb_data_year, scale_factor, params, next_agent_id)
             event_log.extend(d_events + b_events + m_events)
-            summary = log_yearly_summary(year, population, scb_data_year, num_babies)
+            summary = create_yearly_summary(year, population, scb_data_year, num_babies)
         else:
             population = perform_aging_and_assimilation(population, year, params)
             population, d_events = perform_deaths_forecast(population, year, scale_factor, params, forecast_settings)
             population, b_events, next_agent_id, num_babies = perform_births_forecast(population, year, scale_factor, params, forecast_settings, next_agent_id)
             population, m_events, next_agent_id = perform_migration_forecast(population, year, scale_factor, params, forecast_settings, next_agent_id)
             event_log.extend(d_events + b_events + m_events)
-            summary = log_yearly_summary_forecast(year, population, num_babies)
+            summary = create_forecast_summary(year, population, num_babies)
         
-        simulation_log.append(summary)
+        simulation_summary.append(summary)
         progress_bar.progress((i + 1) / total_years, f"Simulerar år {year+1}...")
     
     progress_bar.empty()
     population.loc[population['is_alive'], 'age'] += 1
-    return pd.DataFrame(simulation_log).set_index('År'), population, pd.DataFrame(event_log)
+    return pd.DataFrame(simulation_summary).set_index('Year'), population, pd.DataFrame(event_log)
 
 # --- HUVUDPROGRAM & ANVÄNDARGRÄNSSNITT ---
-st.title("🇸🇪 Demografisk Simulator (Modell 3.3)")
-st.sidebar.header("Kärnparametrar"); scale_factor = st.sidebar.slider("Simuleringens Skalningsfaktor (1:X)", 10, 1000, 1000, 10)
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Kör Simulering & Resultat", "Parametrar & Inställningar", "Framtidsprognoser", "Agent-utforskaren", "Så fungerar modellen"])
+st.title("🇸🇪 Demografisk Simulator: Kulturell Dynamik (v4.1)")
+st.sidebar.header("Kärnparametrar")
+scale_factor = st.sidebar.slider(
+    "Simuleringens Skalningsfaktor (1:X)", 10, 1000, 1000, 10,
+    help="Bestämmer upplösningen på simuleringen. En lägre siffra ger en mer detaljerad (men långsammare) simulering. Exempel: Vid 1000 representerar 1 'agent' 1000 verkliga personer. Standard är 1000."
+)
 
-# All UI-kod från och med här är identisk med den föregående versionen
-# (Eftersom ändringarna i UI och session state redan var korrekta)
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Resultat", "Parametrar", "Framtidsscenarier", "Agent-utforskaren", "Om Modellen"])
+
+# Kartläggning från kodens namn till snygga UI-etiketter.
+UI_LABELS = {
+    "Swedish_Background": "Svensk bakgrund",
+    "First_Generation": "Första generationen",
+    "Later_Generations": "Senare generationer",
+    "Simulated_Population": "Simulerad befolkning",
+    "Actual_Population_SCB": "Verklig befolkning (SCB)",
+    "Simulated_Births": "Simulerade födslar",
+    "Actual_Births_SCB": "Verkliga födslar (SCB)"
+}
 
 with tab1:
     st.header("Kör Simulering & Analysera Resultat")
@@ -393,136 +486,184 @@ with tab1:
     final_end_year = forecast_settings_to_run['forecast_end_year']
     
     if st.button(f"KÖR SIMULERING (Skala 1:{scale_factor}, till år {final_end_year})", use_container_width=True, type="primary"):
-        scb_data = load_and_prepare_scb_data('SCB Raw Data.csv', final_end_year) 
-        summary_log, full_pop, event_log = run_abm_simulation(scb_data, params_to_run, scale_factor, forecast_settings_to_run)
-        st.session_state.update({'results_summary': summary_log, 'results_population': full_pop, 'results_events': event_log})
+        scb_data = load_scb_data('SCB Raw Data.csv', final_end_year) 
+        summary_df, final_pop, event_log = run_abm_simulation(scb_data, params_to_run, scale_factor, forecast_settings_to_run)
+        st.session_state.update({'results_summary': summary_df, 'results_population': final_pop, 'results_events': event_log})
     
     if 'results_summary' in st.session_state:
-        results = st.session_state['results_summary']; st.success("Simuleringen är klar!", icon="✅"); st.subheader("Resultat"); scale_results = st.checkbox("Visa resultat i verklig skala", value=True)
+        results = st.session_state['results_summary']
+        st.success("Simuleringen är klar!", icon="✅")
+        st.subheader("Resultat")
+        scale_results = st.checkbox("Visa resultat i verklig skala", value=True)
+        
         display_df = results.copy()
         if scale_results:
-            for col in ['Sim_Totalpop', 'Inhemsk', 'Invandrarbakgrund', 'Invandrare', 'Sim_Födda']: 
+            cols_to_scale = ['Simulated_Population', 'Swedish_Background', 'Later_Generations', 'First_Generation', 'Simulated_Births']
+            for col in cols_to_scale: 
                 display_df[col] = pd.to_numeric(display_df[col], errors='coerce').multiply(scale_factor)
-        st.info("Notera: SCB-data är endast tillgänglig fram till 2024. Data efter detta år bygger på prognosantaganden.")
         
-        st.subheader("Simulerad Befolkningsutveckling"); c1, c2 = st.columns([1,1])
-        default_groups = ["Inhemsk", "Invandrarbakgrund", "Invandrare", "Sim_Totalpop"]; 
-        selected_groups = c1.multiselect("Välj grupper att visa:", options=default_groups, default=default_groups)
-        combine_groups = c2.checkbox("Slå ihop 'Invandrare' & 'Invandrarbakgrund'"); plot_df = display_df.copy()
+        st.info(f"Data efter {params_to_run['simulation']['end_year']} bygger på prognosantaganden.")
+        
+        st.subheader("Befolkningsutveckling per bakgrund")
+        c1, c2 = st.columns([1,1])
+        
+        default_groups_code = ["Swedish_Background", "Later_Generations", "First_Generation"]
+        options_for_multiselect = {code: label for code, label in UI_LABELS.items() if code in default_groups_code}
+        
+        selected_groups_code = c1.multiselect("Välj grupper att visa:", options=options_for_multiselect.keys(), default=default_groups_code, format_func=lambda code: options_for_multiselect[code])
+        
+        combine_groups = c2.checkbox("Slå ihop grupper med utländsk bakgrund")
+        plot_df = display_df.copy().rename(columns=UI_LABELS)
+        
         if combine_groups:
-            plot_df["Icke-inhemsk"] = plot_df["Invandrare"].fillna(0) + plot_df["Invandrarbakgrund"].fillna(0)
-            groups_to_plot = [g for g in selected_groups if g not in ["Invandrare", "Invandrarbakgrund"]] + ["Icke-inhemsk"]
-        else: groups_to_plot = selected_groups
+            plot_df["Utländsk bakgrund (totalt)"] = plot_df[UI_LABELS["First_Generation"]].fillna(0) + plot_df[UI_LABELS["Later_Generations"]].fillna(0)
+            groups_to_plot_labels = [UI_LABELS[g] for g in selected_groups_code if g not in ["First_Generation", "Later_Generations"]] + ["Utländsk bakgrund (totalt)"]
+        else: 
+            groups_to_plot_labels = [UI_LABELS[g] for g in selected_groups_code]
         
-        fig_groups = px.line(plot_df, y=groups_to_plot, labels={"value": "Antal Personer", "variable": "Befolkningsgrupp"})
-        fig_groups.add_vline(x=params_to_run['end_year'], line_width=2, line_dash="dash", line_color="red", annotation_text="Prognosstart", annotation_position="top left")
+        fig_groups = px.line(plot_df, y=groups_to_plot_labels, labels={"value": "Antal Personer", "variable": "Befolkningsgrupp"})
+        fig_groups.add_vline(x=params_to_run['simulation']['end_year'], line_width=2, line_dash="dash", line_color="red", annotation_text="Prognosstart", annotation_position="top left")
         st.plotly_chart(fig_groups, use_container_width=True)
         
         with st.expander("Visa valideringsgrafer"):
-            val_df = display_df
-            fig_pop = px.line(val_df, y=['Sim_Totalpop', 'SCB_Totalpop'], title="Total Befolkning (Simulerad vs. SCB/Prognos)")
-            fig_pop.add_vline(x=params_to_run['end_year'], line_width=2, line_dash="dash", line_color="red")
+            val_df = plot_df
+            fig_pop = px.line(val_df, y=[UI_LABELS['Simulated_Population'], UI_LABELS['Actual_Population_SCB']], title="Total Befolkning (Simulerad vs. Verklig)")
+            fig_pop.add_vline(x=params_to_run['simulation']['end_year'], line_width=2, line_dash="dash", line_color="red")
             st.plotly_chart(fig_pop, use_container_width=True)
-            fig_births = px.line(val_df, y=['Sim_Födda', 'SCB_Födda'], title="Antal Födda (Simulerat vs. SCB/Prognos)")
-            fig_births.add_vline(x=params_to_run['end_year'], line_width=2, line_dash="dash", line_color="red")
+            fig_births = px.line(val_df, y=[UI_LABELS['Simulated_Births'], UI_LABELS['Actual_Births_SCB']], title="Antal Födda (Simulerat vs. Verkligt)")
+            fig_births.add_vline(x=params_to_run['simulation']['end_year'], line_width=2, line_dash="dash", line_color="red")
             st.plotly_chart(fig_births, use_container_width=True)
-        with st.expander("Visa Detaljerad Simuleringslogg"): st.dataframe(display_df.style.format("{:,.0f}", na_rep='-'), use_container_width=True)
+        
+        with st.expander("Visa Detaljerad Simuleringslogg"): 
+            st.dataframe(display_df.rename(columns=UI_LABELS).style.format("{:,.0f}", na_rep='-'), use_container_width=True)
 
 with tab2:
-    st.header("Justerbara Modellparametrar"); st.info("Här kan du finjustera modellens antaganden innan du kör simuleringen."); 
-    params = st.session_state['edited_params']
-    with st.expander("Assimilering & Blandrelationer", expanded=True):
-        params["base_assimilation_rate"] = st.slider("Maximal Assimilationstakt (% per år)", 0.0, 2.0, params['base_assimilation_rate'] * 100, 0.1, help="Den faktiska takten skalas med andelen av den totala befolkningen som är 'Inhemsk'.") / 100.0
+    st.header("Modellparametrar")
+    st.info("Här kan du finjustera modellens grundantaganden. Standardvärdena är baserade på officiell statistik och vedertagna demografiska principer där det är möjligt.") 
+    p = st.session_state['edited_params']
+    
+    with st.expander("Assimilering & Social Dynamik", expanded=True):
+        p['assimilation']['base_rate'] = st.slider(
+            "Maximal Assimilationstakt (% per år)", 0.0, 2.0, p['assimilation']['base_rate'] * 100, 0.1,
+            help="**Detta är ett grundantagande i modellen och har ingen direkt statistisk källa.**\n\nDetta värde representerar den teoretiska maxhastigheten för assimilering under de mest gynnsamma förhållandena (dvs. när 100% av befolkningen har svensk bakgrund).\n\nDen **faktiska** assimilationstakten varje år är en produkt av detta värde, den dynamiska styrkan (nedan), och ursprungsspecifika multiplikatorer."
+        ) / 100.0
         
         st.markdown("---")
-        st.subheader("Avancerad Assimileringsdynamik")
-        params["enable_tipping_point_assimilation"] = st.checkbox(
-            "Aktivera dynamisk assimilering (tipping point)",
-            value=params.get("enable_tipping_point_assimilation", False),
-            help="Om andelen 'Inhemska' sjunker under ett tröskelvärde, kan assimilationen bli negativ."
+        st.subheader("Assimileringens Dynamik")
+        p['assimilation']['strength_multiplier'] = st.slider(
+            "Styrka på assimilationsdynamik", 0.0, 3.0, p['assimilation']['strength_multiplier'], 0.1,
+            help="Styr den övergripande kraften i den dynamiska assimilationsmodellen.\n\nModellen är designad så att assimilationsprocessen naturligt stannar av när andelen av befolkningen med 'svensk bakgrund' är 50%. Denna parameter skalar hur starkt assimileringen driver mot 100% (när andelen är >50%) eller mot 0% (när andelen är <50%).\n\n- **1.0 (Standard):** Modellen körs med standardantagandet.\n- **> 1.0:** Simulerar ett samhälle med starkare sociala krafter (snabbare assimilering/de-assimilering).\n- **< 1.0:** Simulerar ett samhälle där sociala processer är trögare.\n- **0.0:** Stänger helt av den dynamiska mekanismen."
         )
-        if params["enable_tipping_point_assimilation"]:
-            params["assimilation_tipping_point"] = st.slider(
-                "Tröskelvärde för negativ assimilering (%)", 0.0, 100.0,
-                params.get("assimilation_tipping_point", 0.5) * 100, 1.0,
-                help="När andelen 'Inhemska' är under detta värde, blir assimilationen negativ."
-            ) / 100.0
-            params["negative_assimilation_strength"] = st.slider(
-                "Styrka på negativ assimilering", 0.1, 5.0,
-                params.get("negative_assimilation_strength", 1.0), 0.1,
-                help="En multiplikator för hur snabbt den negativa assimileringen sker."
-            )
-        
-        st.markdown("---")
-        st.subheader("Blandrelationer (Sannolikhet för partner utanför gruppen)")
-        c1, c2 = st.columns(2)
-        params["mixing_factor_inhemsk"]["start_value"] = c1.slider("Inhemsk mor, 1960 (%)", 0.0, 50.0, params["mixing_factor_inhemsk"]["start_value"] * 100, 1.0) / 100.0
-        params["mixing_factor_inhemsk"]["end_value"] = c2.slider("Inhemsk mor, 2019 (%)", 0.0, 50.0, params["mixing_factor_inhemsk"]["end_value"] * 100, 1.0) / 100.0
-        c3, c4 = st.columns(2)
-        params["mixing_factor_utlandsk"]["start_value"] = c3.slider("Mor m. utländsk bakgrund, 1960 (%)", 0.0, 50.0, params["mixing_factor_utlandsk"]["start_value"] * 100, 1.0) / 100.0
-        params["mixing_factor_utlandsk"]["end_value"] = c4.slider("Mor m. utländsk bakgrund, 2019 (%)", 0.0, 50.0, params["mixing_factor_utlandsk"]["end_value"] * 100, 1.0) / 100.0
-        
-    with st.expander("Assimileringsparametrar per Ursprungsgrupp"):
-        st.subheader("Startvärde för 'Andel Inhemsk' vid ankomst")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        cols = [c1, c2, c3, c4, c5]
-        origins = list(params["assimilation_start_share"].keys())
-        for i, origin in enumerate(origins):
-            params["assimilation_start_share"][origin] = cols[i].slider(f"{origin} (%)", 0.0, 100.0, params["assimilation_start_share"][origin] * 100, 1.0, key=f"start_{origin}") / 100.0
 
         st.markdown("---")
-        st.subheader("Multiplikator för Assimileringstakt")
+        st.subheader("Utvandringsbenägenhet")
+        p['migration']['emigration_bias'] = st.slider(
+            "Multiplikator för utvandring (utländsk bakgrund)", 1.0, 15.0, p['migration']['emigration_bias'], 0.5,
+            help="Styr hur mycket mer sannolikt det är att en person med 0% svenskandel utvandrar jämfört med en med 100%.\n\n**Relation:** En persons utvandringssannolikhet beräknas som `1 + (1 - swedish_share) * (Multiplikator - 1)`.\n\n**Källa:** Standardvärdet är en modellkalibrering, men principen baseras på SCB-statistik som visar att utrikes födda har en betydligt högre benägenhet att utvandra. För att hitta denna typ av data, sök på 'Utrikes föddas återutvandring' på scb.se."
+        )
+        
+        st.markdown("---")
+        st.subheader("Blandrelationer")
+        st.markdown("Här ställs sannolikheten för att en mor hittar en partner **utanför** sin egen bakgrundsgrupp. Värdena interpoleras linjärt mellan start- och slutår.")
+        c1, c2 = st.columns(2)
+        p['mixing']['swedish_background_mother']['start_value'] = c1.slider(
+            "Mor med svensk bakgrund, 1960 (%)", 0.0, 50.0, p['mixing']['swedish_background_mother']['start_value'] * 100, 1.0,
+            help="Sannolikheten att en mor med 100% svenskandel får barn med en far som har <100% svenskandel. **Källa:** Värdena är modellkalibreringar baserade på den observerade ökningen av barn med en inrikes och en utrikes född förälder. För att hitta denna typ av data, sök på 'Familjeliv i Sverige' på scb.se."
+        ) / 100.0
+        p['mixing']['swedish_background_mother']['end_value'] = c2.slider("Mor med svensk bakgrund, 2019 (%)", 0.0, 50.0, p['mixing']['swedish_background_mother']['end_value'] * 100, 1.0) / 100.0
+        c3, c4 = st.columns(2)
+        p['mixing']['foreign_background_mother']['start_value'] = c3.slider(
+            "Mor med utländsk bakgrund, 1960 (%)", 0.0, 50.0, p['mixing']['foreign_background_mother']['start_value'] * 100, 1.0,
+            help="Sannolikheten att en mor med <100% svenskandel får barn med en far som har 100% svenskandel."
+        ) / 100.0
+        p['mixing']['foreign_background_mother']['end_value'] = c4.slider("Mor med utländsk bakgrund, 2019 (%)", 0.0, 50.0, p['mixing']['foreign_background_mother']['end_value'] * 100, 1.0) / 100.0
+        
+    with st.expander("Parametrar per Ursprungsgrupp"):
+        st.subheader("Initial 'svenskandel' vid ankomst")
+        st.markdown("Detta är ett **modellantagande** som representerar en nyanländ immigrants initiala kulturella och sociala närhet till det svenska samhället.")
         c1, c2, c3, c4, c5 = st.columns(5)
         cols = [c1, c2, c3, c4, c5]
-        origins = list(params["assimilation_rate_multiplier"].keys())
+        origins = list(p['assimilation']['start_shares'].keys())
         for i, origin in enumerate(origins):
-            params["assimilation_rate_multiplier"][origin] = cols[i].slider(f"{origin}", 0.0, 10.0, params["assimilation_rate_multiplier"][origin], 0.5, key=f"rate_{origin}")
+            p['assimilation']['start_shares'][origin] = cols[i].slider(f"{origin} (%)", 0.0, 100.0, p['assimilation']['start_shares'][origin] * 100, 1.0, key=f"start_{origin}") / 100.0
+
+        st.markdown("---")
+        st.subheader("Relativ Assimileringstakt (Multiplikator)")
+        st.markdown("Detta är ett **modellantagande** som reflekterar hur snabbt olika grupper antas assimilera sig, relativt till varandra, baserat på faktorer som kulturellt och språkligt avstånd.")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        cols = [c1, c2, c3, c4, c5]
+        origins = list(p['assimilation']['rate_multipliers'].keys())
+        for i, origin in enumerate(origins):
+            p['assimilation']['rate_multipliers'][origin] = cols[i].slider(f"{origin}", 0.0, 10.0, p['assimilation']['rate_multipliers'][origin], 0.5, key=f"rate_{origin}")
         
-    with st.expander("Fruktsamhet per Ursprungsgrupp (Påslag mot Inhemska)"):
-        for origin, bonus in params["fertility_bonuses"].items():
-            if origin != "Svensk": params["fertility_bonuses"][origin] = st.slider(origin, 0.0, 2.0, bonus, 0.1, key=f"fert_{origin}")
+    with st.expander("Fertilitetsbonus per Ursprungsgrupp"):
+        st.markdown("Här anges en fertilitetsbonus relativt till gruppen med svensk bakgrund. Värdet är en multiplikator på den del av födselpotentialen som inte är kopplad till 'svenskandel'.")
+        for origin, bonus in p['fertility']['bonuses'].items():
+            if origin != "Svensk": 
+                p['fertility']['bonuses'][origin] = st.slider(
+                    origin, 0.0, 2.0, bonus, 0.1, key=f"fert_{origin}",
+                    help=f"**Källa:** Standardvärdena är kalibrerade för att spegla observerade skillnader i summerad fruktsamhet (TFR) mellan inrikes födda och utrikes födda från olika regioner. För att hitta denna data, sök på 'Befolkningsframskrivning' på scb.se och leta efter tabeller om fruktsamhet för inrikes/utrikes födda."
+                )
             
-    with st.expander("Historiska Migrationsvågor (Sannolikhet för ursprung)"):
-        for period, wave in sorted(params["migration_waves"].items()):
-            st.subheader(f"Period: {period}"); cols = st.columns(len(wave))
+    with st.expander("Historisk Invandrarsammansättning"):
+        st.markdown("Fördelningen av invandrare från olika ursprungsregioner under olika tidsperioder.")
+        for period, wave in sorted(p['migration']['historical_waves'].items()):
+            st.subheader(f"Period: {period}")
+            st.markdown(f"**Källa:** Standardvärdena är approximeringar baserade på SCB:s data över invandring. För att hitta denna typ av data, sök på 'Invandring och utvandring efter födelseland' i Statistikdatabasen på scb.se. Värdena speglar de stora skiftena från arbetskraftsinvandring från Europa till flyktinginvandring.", help="Den totala summan för en period bör vara 100%. Modellen normaliserar automatiskt värdena om summan inte stämmer.")
+            cols = st.columns(len(wave))
             for i, (origin, prob) in enumerate(wave.items()): 
-                params["migration_waves"][period][origin] = cols[i].number_input(f"{origin} (%)", 0.0, 100.0, prob * 100, 5.0, key=f"{period}_{origin}") / 100.0
-    st.session_state['edited_params'] = params
+                p['migration']['historical_waves'][period][origin] = cols[i].number_input(f"{origin} (%)", 0.0, 100.0, prob * 100, 5.0, key=f"{period}_{origin}") / 100.0
+    
+    st.session_state['edited_params'] = p
 
 with tab3:
-    st.header("Framtidsprognoser & Scenarier")
-    st.info("Här kan du definiera antaganden för modellens prognosperiod (från 2025 och framåt).")
-
+    st.header("Framtidsscenarier")
+    st.info("Här definierar du antaganden för modellens prognosperiod (från 2025 och framåt). Standardvärdena är satta för att spegla SCB:s senaste huvudscenario för Sveriges framtida befolkning.")
     settings = st.session_state['forecast_settings'] 
 
     st.subheader("Simuleringshorisont")
     settings['forecast_end_year'] = st.slider("Prognosens Slutår", 2025, 2200, settings['forecast_end_year'], 5)
 
     st.subheader("Framtida Fruktsamhet")
-    settings['tfr'] = st.slider("Total Fruktsamhetskvot (TFR)", 1.0, 2.5, settings['tfr'], 0.05)
+    settings['tfr'] = st.slider(
+        "Summerad Fruktsamhet (TFR)", 1.0, 2.5, settings.get('tfr', 1.59), 0.01,
+        help="Genomsnittligt antal barn en kvinna förväntas föda under sin livstid. **Standardvärdet (1.59)** är SCB:s långsiktiga antagande i deras senaste befolkningsprognos. För att hitta källan, sök på 'Befolkningsframskrivning 2024–2070' på scb.se."
+    )
 
     st.subheader("Framtida Dödlighet")
-    settings['target_le_male'] = st.slider("Mål: Livslängd Män (år vid 2050)", 75.0, 95.0, settings['target_le_male'], 0.1)
-    settings['target_le_female'] = st.slider("Mål: Livslängd Kvinnor (år vid 2050)", 80.0, 100.0, settings['target_le_female'], 0.1)
-    settings['cdr_target_2050'] = st.slider("Mål: Rå Dödstal (CDR) vid 2050 (per 1000 inv.)", 5.0, 15.0, settings['cdr_target_2050'], 0.1)
+    st.markdown("Modellen interpolerar linjärt mot dessa målvärden fram till år 2050.")
+    c1, c2, c3 = st.columns(3)
+    settings['target_le_male'] = c1.slider(
+        "Mål: Livslängd Män (2050)", 75.0, 95.0, settings.get('target_le_male', 85.3), 0.1,
+        help="Förväntad medellivslängd för män år 2050. **Standardvärdet (85.3 år)** är SCB:s prognos. För att hitta källan, sök på 'Befolkningsframskrivning 2024–2070' på scb.se."
+    )
+    settings['target_le_female'] = c2.slider(
+        "Mål: Livslängd Kvinnor (2050)", 80.0, 100.0, settings.get('target_le_female', 87.7), 0.1,
+        help="Förväntad medellivslängd för kvinnor år 2050. **Standardvärdet (87.7 år)** är SCB:s prognos. För att hitta källan, sök på 'Befolkningsframskrivning 2024–2070' på scb.se."
+    )
+    settings['cdr_target_2050'] = c3.slider(
+        "Mål: Dödstal (CDR, per 1000 inv.)", 5.0, 15.0, settings['cdr_target_2050'], 0.1,
+        help="Rått dödstal (Crude Death Rate). Detta värde påverkas av befolkningens åldersstruktur. Standardvärdet är en kalibrering som samspelar med den ökande livslängden och en åldrande befolkning."
+    )
 
     st.subheader("Framtida Migration")
-    settings['migration_model'] = st.radio(
-        "Välj migrationsmodell för prognosen:",
-        ('Absoluta tal', 'Procent av befolkningen'),
-        index=0 if settings.get('migration_model', 'Absoluta tal') == 'Procent av befolkningen' else 1,
-        help="Välj om migrationen ska vara ett fast antal personer per år, eller en procentandel av den totala befolkningen."
-    )
+    st.markdown("Detta är en av de mest osäkra faktorerna i en befolkningsprognos. Standardvärdena baseras på ett genomsnitt av de senaste årens utfall, men kan justeras för att testa olika scenarier.")
+    migration_model_options = ('Absoluta tal', 'Procent av befolkningen')
+    current_model_index = migration_model_options.index(settings.get('migration_model', 'Procent av befolkningen'))
     
+    settings['migration_model'] = st.radio("Välj migrationsmodell för prognosen:", migration_model_options, index=current_model_index)
+    
+    c1, c2 = st.columns(2)
     if settings['migration_model'] == 'Absoluta tal':
-        settings['annual_immigrants'] = st.slider("Årlig Invandring (antal)", 0, 150000, settings['annual_immigrants'], 5000)
-        settings['annual_emigrants'] = st.slider("Årlig Utvandring (antal)", 0, 100000, settings['annual_emigrants'], 5000)
+        settings['annual_immigrants'] = c1.slider("Årlig Invandring (antal)", 0, 150000, settings['annual_immigrants'], 5000)
+        settings['annual_emigrants'] = c2.slider("Årlig Utvandring (antal)", 0, 100000, settings['annual_emigrants'], 5000)
     else:
-        settings['immigration_rate'] = st.slider("Årlig Invandring (% av totalbefolkningen)", 0.0, 2.0, settings.get('immigration_rate', 0.0075) * 100, 0.05) / 100.0
-        settings['emigration_rate'] = st.slider("Årlig Utvandring (% av totalbefolkningen)", 0.0, 2.0, settings.get('emigration_rate', 0.0057) * 100, 0.05) / 100.0
+        settings['immigration_rate'] = c1.slider("Årlig Invandring (% av befolkningen)", 0.0, 2.0, settings.get('immigration_rate', 0.0075) * 100, 0.05) / 100.0
+        settings['emigration_rate'] = c2.slider("Årlig Utvandring (% av befolkningen)", 0.0, 2.0, settings.get('emigration_rate', 0.0057) * 100, 0.05) / 100.0
     
     st.markdown("---")
     st.subheader("Framtida Invandrarsammansättning (från 2025)")
+    st.markdown("Andelen invandrare från olika regioner. Detta är ett **scenariovärde** som du kan justera. Standard är att fortsätta med samma fördelning som under den senaste historiska perioden (2001-2024).")
     cols = st.columns(len(st.session_state['future_migration_composition']))
     for i, (origin, prob) in enumerate(st.session_state['future_migration_composition'].items()):
         st.session_state['future_migration_composition'][origin] = cols[i].number_input(
@@ -539,83 +680,104 @@ with tab3:
 
 with tab4:
     st.header("Agent-utforskaren")
-    if 'results_population' not in st.session_state: st.info("Kör en simulering för att ladda data.")
+    if 'results_population' not in st.session_state: st.info("Kör en simulering på första fliken för att ladda agentdata.")
     else:
-        population_df = st.session_state['results_population']; event_log_df = st.session_state['results_events']
+        population_df = st.session_state['results_population']
+        event_log_df = st.session_state['results_events']
         with st.expander("Sök & Filtrera Agenter", expanded=True):
             c1, c2, c3 = st.columns(3)
             unique_origins = list(population_df['ethnic_origin'].unique())
             origin_filter = c1.selectbox("Filtrera på Ursprung:", options=['Alla'] + sorted(unique_origins)) 
             max_age_possible = int(population_df['age'].max()) if not population_df.empty else 120
             age_filter = c2.slider(f"Filtrera på Slutålder ({st.session_state['forecast_settings']['forecast_end_year']}):", -1, max_age_possible, (-1, max_age_possible))
-            share_filter = c3.slider("Filtrera på Slutgiltig Andel Inhemsk (%):", 0, 100, (0, 100))
+            share_filter = c3.slider("Filtrera på Slutgiltig 'svenskandel' (%):", 0, 100, (0, 100))
+            
             filtered_df = population_df.copy()
             if origin_filter != 'Alla': filtered_df = filtered_df[filtered_df['ethnic_origin'] == origin_filter]
             if age_filter[0] > -1: filtered_df = filtered_df[filtered_df['age'] >= age_filter[0]]
             if age_filter[1] < max_age_possible: filtered_df = filtered_df[filtered_df['age'] <= age_filter[1]]
             filtered_df = filtered_df[(filtered_df['swedish_share'] * 100 >= share_filter[0]) & (filtered_df['swedish_share'] * 100 <= share_filter[1])]
-            st.write(f"Hittade {len(filtered_df)} agenter."); st.dataframe(filtered_df.head(1000).style.format({'swedish_share': '{:.2%}'}))
+            
+            st.write(f"Hittade {len(filtered_df)} agenter som matchar dina filter.")
+            st.dataframe(filtered_df.head(1000).style.format({'swedish_share': '{:.2%}'}))
         
-        st.subheader("Visa en agents livshistoria")
-        # (Logik för Agent-utforskaren är oförändrad)
+        # Logik för att visa en enskild agents livshistoria är oförändrad.
 
 with tab5:
     st.header("Så fungerar modellen")
+    st.markdown("""
+    Detta verktyg är en **agentbaserad demografisk simulator** för Sverige. Det betyder att den skapar en digital miniatyrbefolkning av individer ("agenter") och simulerar deras livsöden år för år, från 1960 och in i framtiden.
     
-    with st.expander("Abstraktnivå 1: Hög abstrakthet (Koncis översikt)", expanded=False):
-        st.markdown("""
-        Detta verktyg simulerar hur Sveriges befolkning utvecklas från 1960 och framåt. Det använder officiella siffror från Statistiska centralbyrån (SCB) för åren fram till 2024 och gör sedan uppskattningar för framtiden baserat på vad du väljer, som hur många barn som föds eller hur många som flyttar hit. Varje person i simuleringen är som en digital figur med egenskaper som ålder, kön och bakgrund. Verktyget räknar ut vad som händer år för år – som att folk blir äldre, får barn eller flyttar. Du kan ändra inställningarna för att testa olika framtider, och resultatet visas i grafer och tabeller.
+    Kärnan i modellen är att spåra och simulera **kulturell dynamik**. Detta görs genom att varje person i simuleringen har en grad av social och kulturell tillhörighet till den svenska majoritetskulturen. Detta gör det möjligt att utforska hur befolkningens sammansättning kan förändras över tid, baserat på en kombination av historisk data och dina egna antaganden om framtiden.
+    
+    Nedan följer en förklaring av modellen på tre olika nivåer av detalj.
+    """)
 
-        Verktyget är realistiskt eftersom det använder SCB:s exakta siffror för historiska år, så det stämmer med verkligheten för befolkning, födslar och dödsfall. Standardinställningarna är logiska och baserade på verkliga trender: Till exempel föds fler barn i vissa invandrargrupper, vilket matchar SCB-data där utrikes födda från Mellanöstern och Afrika har högre fertilitet än inrikes födda. Migrationen följer också historiska mönster, som mer invandring från Europa på 1960–80-talet och från Mellanöstern på 2000-talet, enligt SCB:s statistik.
+    with st.expander("Abstraktnivå 1: Hög (Koncis översikt)", expanded=True):
+        st.markdown("""
+        Detta verktyg simulerar hur Sveriges befolkning och dess kulturella sammansättning utvecklas. Det börjar med verkliga siffror från Statistiska centralbyrån (SCB) för år 1960 och följer den historiska utvecklingen fram till idag. Därefter skapar den en prognos för framtiden baserat på de antaganden du ställer in.
+
+        Varje person i simuleringen är en digital figur med egenskaper som ålder, kön och kulturell bakgrund. Modellen beräknar år för år hur dessa digitala personer åldras, får barn, flyttar och hur deras kulturella tillhörighet förändras över tid.
+
+        Du kan ändra på antaganden om framtida barnafödande, migration och hur snabbt integrationen går för att testa olika "tänk om"-scenarier. Resultaten hjälper till att visualisera de långsiktiga effekterna av olika demografiska trender.
         """)
 
-    with st.expander("Abstraktnivå 2: Medel abstrakthet (Balanserad förklaring)", expanded=False):
+    with st.expander("Abstraktnivå 2: Medel (Balanserad förklaring)", expanded=False):
         st.markdown("""
-        Verktyget är en simulering där varje person är en digital figur med egenskaper som ålder, kön och hur mycket "svensk" bakgrund de har. Det bygger på SCB:s siffror för 1960–2024 och gör sedan framtidsuppskattningar baserat på dina val. År för år räknas det ut vad som händer: Folk blir äldre och kan bli mer integrerade, några dör, nya barn föds, och folk flyttar in eller ut.
+        Simulatorn bygger på en population av digitala individer. Varje individ har en central egenskap: en grad av **kulturell tillhörighet** till den svenska majoritetskulturen, ett värde mellan 0% och 100%.
 
-        Varje år:
-        - Alla som lever blir ett år äldre, och de med utländsk bakgrund blir lite mer "svenska" genom integration. Om svenskar blir mindre än hälften kan integrationen bli svårare.
-        - Dödsfall beräknas efter ålder och matchar SCB:s siffror för gamla år. För framtiden används antaganden om längre liv och färre dödsfall.
-        - Barn föds hos kvinnor i fertil ålder, med högre chans för vissa bakgrunder, och par kan vara blandade. Barn ärver egenskaper från föräldrarna.
-        - Flyttar: Nya personer kommer hit med olika bakgrunder, och några lämnar landet. Detta matchar SCB historiskt och dina val för framtiden.
+        **Viktigt antagande:** Eftersom detaljerad data saknas, utgår modellen från en förenklad startpunkt där hela Sveriges befolkning år 1960 antas ha 100% svensk kulturell tillhörighet.
 
-        Verktyget är realistiskt eftersom det alltid stämmer med SCB:s siffror för historiska år, som 10,55 miljoner invånare 2023 eller 100 000 födslar 2023. Framtidsgissningarna bygger på rimliga trender, som att folk lever längre. Standardinställningarna är logiska: Högre barnantal för grupper från Mellanöstern (20% fler barn) stämmer med SCB:s data om högre fertilitet för utrikes födda (ca 1,7 barn per kvinna mot 1,4 för inrikes). Migrationen speglar verkligheten, som 115 000 immigranter 2013, mest från Asien och Afrika, enligt SCB.
+        Modellen körs i en årlig cykel. För varje år sker följande händelser i ordning:
+
+        - **1. Åldrande och Kulturell Förändring:** Alla individer blir ett år äldre. Samtidigt justeras deras kulturella tillhörighet baserat på den totala befolkningens sammansättning. Processen är dynamisk:
+            - I ett samhälle med en stor majoritet med svensk bakgrund, är den sociala "dragkraften" mot integration stark.
+            - Om andelen med svensk bakgrund minskar och närmar sig 50%, avstannar integrationsprocessen.
+            - Om andelen understiger 50%, kan processen vända, vilket representerar en starkare dragkraft mot minoritetskulturer.
+
+        - **2. Dödsfall:** Individer riskerar att dö baserat på sin ålder. För historiska år (1960-2024) styrs antalet dödsfall exakt av SCB:s data. För framtiden används dina prognoser om ökad medellivslängd.
+
+        - **3. Födslar:** Kvinnor i fertil ålder kan få barn. Sannolikheten påverkas av deras ursprung och kulturella tillhörighet, för att matcha de observerade fertilitetsskillnaderna i befolkningen. Ett barn ärver en blandning av sina föräldrars egenskaper.
+
+        - **4. Migration:** Nya individer (invandrare) skapas och läggs till i befolkningen, med en sammansättning som följer historiska migrationsvågor. Samtidigt tas individer bort för att representera utvandring, där de med en lägre grad av svensk kulturell tillhörighet har en högre sannolikhet att lämna landet.
         """)
 
-    with st.expander("Abstraktnivå 3: Låg abstrakthet (Detaljerad genomgång)", expanded=False):
+    with st.expander("Abstraktnivå 3: Låg (Detaljerad genomgång)", expanded=False):
         st.markdown("""
-        Här är en steg-för-steg-guide till hur verktyget fungerar, förklarat som en enkel berättelse från början till slut. Vi går igenom var siffrorna kommer ifrån, hur personerna i simuleringen är uppbyggda, vad som händer varje år, vad du kan ändra, och hur resultaten visas. Allt förklaras på vanligt språk, utan tekniska detaljer. Till sist förklarar jag varför verktyget är realistiskt och varför standardinställningarna håller, med stöd från SCB och andra källor.
+        Här följer en detaljerad konceptuell genomgång av modellens komponenter och processer.
 
-        ### 1. Var siffrorna kommer ifrån och hur det sätts upp
-        Verktyget använder officiella siffror från Statistiska centralbyrån (SCB), som är Sveriges expert på befolkningsstatistik. Det läser en fil med data från 1960 och framåt, med siffror om hur många som bor i Sverige, föds, dör, flyttar in eller ut, och hur länge folk lever i snitt. Om något år saknar siffror fylls de i smart genom att gissa baserat på åren runt omkring, så att allt blir en jämn linje. För att göra beräkningarna snabbare simuleras befolkningen i mindre skala – som att en person i modellen står för tusen riktiga människor – men resultaten räknas upp till verkliga tal när du ser dem. Appen håller koll på dina ändringar så att de sparas medan du använder den.
+        ### 1. Startpunkt och Grundantaganden
+        - **Data:** Modellen använder en tidsserie från SCB (1960-2024) med årlig data om total befolkning, födda, döda, invandring och utvandring.
+        - **Starttillstånd (1960):** Simuleringen börjar med en befolkning som matchar den verkliga storleken och åldersfördelningen för 1960. Ett centralt och förenklande antagande görs här: **alla individer i startpopulationen tilldelas 100% svensk kulturell tillhörighet.** Detta är en nödvändig förenkling på grund av brist på detaljerad historisk data.
 
-        ### 2. Hur personerna i simuleringen är uppbyggda
-        Varje person i modellen är som en liten digital profil med viktig information: Hur gamla de är (börjar på noll för bebisar eller nya immigranter), om de är man eller kvinna (slumpas när de skapas), om de lever eller har dött, hur mycket "svensk" bakgrund de har (en siffra från 0 till 100% som visar hur integrerade de är), var de kommer ifrån (som Sverige, Mellanöstern eller Europa), och vem deras mamma och pappa är (för att spåra familj och vad barn ärver). Modellen börjar med en grupp personer som matchar SCB:s siffror för 1960, fördelade efter ålder och kön. Nya personer kommer till när barn föds eller folk flyttar in.
+        ### 2. Den Årliga Simuleringscykeln
+        För varje år från 1960 till prognosens slutår utförs följande steg:
 
-        ### 3. Vad händer varje år? (Huvudberättelsen)
-        Simuleringen går igenom ett år i taget, som en film. För varje år händer saker i en bestämd ordning: Folk blir äldre och kanske mer integrerade, några dör, nya barn föds, och folk flyttar in eller ut. För åren 1960–2024 används SCB:s riktiga siffror för att allt ska stämma, som hur många som föds eller dör. För framtiden (från 2025) används dina uppskattningar, som hur många barn folk får eller hur många som flyttar. Lite slump används för att göra det naturligt, men totalsiffrorna justeras för att matcha förväntningarna.
+        **A. Åldrande & Kulturell Förändring**
+        Alla levande individer blir ett år äldre. Därefter sker den kulturella dynamiken för de individer som befinner sig i en integrationsprocess (varken 0% eller 100% tillhörighet):
+        1.  **Analys av samhällsklimatet:** Modellen mäter andelen av den totala befolkningen som har en helt svensk bakgrund.
+        2.  **Bestämning av kulturell "dragkraft":** Baserat på denna andel bestäms en social "dragkraft". Modellen använder en linjär skala:
+            - Om 100% av befolkningen har svensk bakgrund, är den positiva kraften mot integration som starkast.
+            - Om 50% har svensk bakgrund, är kraften neutral. Det råder en balans där varken integration eller segregation dominerar.
+            - Om 0% har svensk bakgrund, är den negativa kraften (de-assimilering) som starkast, vilket representerar en stark dragkraft mot andra kulturella normer.
+        3.  **Individuell förändring:** Den årliga förändringen för en individs kulturella tillhörighet beräknas sedan baserat på denna "dragkraft", en inställbar grundhastighet, och individens ursprungsregion.
 
-        - **Först: Alla blir äldre och integration händer.** Varje person som lever blir ett år äldre. De med utländsk bakgrund blir lite mer "svenska" över tid – tänk att de lär sig språket, kulturen och vanorna bättre. Hur snabbt det går beror på hur många "inhemska" svenskar som finns i närheten (fler svenskar = snabbare integration) och var personen kommer ifrån (snabbare för folk från Skandinavien, långsammare för andra). Om svenskarna blir färre än hälften kan det bli svårare att integreras, och folk håller sig mer till sin egen grupp – som en sorts "vändpunkt".
+        **B. Dödsfall**
+        - **Historiska år (1960-2024):** En grundrisk att dö baserat på ålder justeras så att det totala antalet dödsfall i simuleringen exakt matchar SCB:s officiella statistik för det året.
+        - **Prognosår (2025+):** Risken att dö justeras dynamiskt för att gradvis uppnå de målvärden för medellivslängd som du ställt in.
 
-        - **Sen: Några dör.** Modellen räknar ut risken att dö baserat på ålder – äldre personer har större risk. För gamla år justeras det så att antalet döda matchar SCB:s siffror, som 94 385 dödsfall 2023. För framtiden gissar den på att folk lever längre (som män till 86 år och kvinnor till 88 år till 2050) och att färre dör per tusen personer (som 8,8 istället för 9,0). Kön spelar roll: Kvinnor lever lite längre än män, vilket stämmer med verkligheten.
+        **C. Födslar**
+        1.  **Födselpotential:** Kvinnor i fertil ålder (15-49 år) får en "födselpotential" som är högre om hon har ett ursprung med statistiskt högre fertilitet och lägre ju starkare hennes svenska kulturella tillhörighet är.
+        2.  **Kalibrering:** Den totala potentialen i populationen justeras så att det förväntade antalet födslar matchar antingen SCB:s historiska data eller din prognos för framtida barnafödande (TFR).
+        3.  **Partner-val och arv:** För varje födsel väljs en far, med en viss sannolikhet för parbildning över bakgrundsgränserna. Barnet ärver hälften av varje förälders kulturella tillhörighet och ett slumpmässigt valt ursprung från en av dem.
 
-        - **Därefter: Nya barn föds.** Modellen kollar på kvinnor mellan 15 och 49 år. Chansen att få barn är högre för vissa grupper (som folk från Mellanöstern) och lägre ju mer integrerad mamman är. För gamla år matchas antalet barn mot SCB, som 100 051 födslar 2023. För framtiden används din gissning på genomsnittligt barnantal, som 1,65 barn per kvinna. När ett barn föds väljs en pappa – ibland från en annan bakgrund, och chansen för blandade par ökar över tid för svenskar men minskar för de med utländsk bakgrund. Barnet får en blandning av föräldrarnas bakgrund.
+        **D. Migration**
+        - **Invandring:** Nya individer skapas. Deras antal styrs av SCB:s data (historiskt) eller dina prognosinställningar (framtid). Deras ålder och ursprungsregion slumpas enligt de fördelningar du ställt in. De tilldelas en initial kulturell tillhörighet baserat på sitt ursprung.
+        - **Utvandring:** Individer tas bort från simuleringen. Antalet styrs på samma sätt. Urvalet av vilka som utvandrar är dock inte helt slumpmässigt; individer med låg kulturell tillhörighet har en högre sannolikhet att lämna landet.
 
-        - **Sist: Folk flyttar in och ut.** Nya personer kommer till Sverige, med bakgrunder som varierar över tid (mer från Europa förr, mer från Mellanöstern nu). De får en startnivå på hur "svenska" de är, högre för folk från närområden. Antalet matchar SCB för gamla år, som 94 514 immigranter 2023, och dina gissningar för framtiden, som 80 000 per år. Några lämnar landet, oftast de med utländsk bakgrund, och antalet justeras på samma sätt, som 73 434 utvandrare 2023.
-
-        ### 4. Vad kan du ändra och varför?
-        Du kan ändra hur snabbt folk integreras, hur ofta par är blandade, hur många extra barn vissa grupper får, var immigranter kommer ifrån, och framtidsgissningar som antal barn, livslängd eller flyttar. Det är som att vrida på rattar för att testa olika framtider, som "tänk om vi har fler barn?" eller "tänk om fler flyttar hit?".
-
-        ### 5. Hur ser du resultaten?
-        När simuleringen är klar får du tabeller och grafer som visar hur befolkningen växer, uppdelat på "inhemska", "invandrare" och "barn till invandrare". Du kan jämföra med SCB:s siffror för att se att det stämmer, och titta på enskilda personers "livshistorier" – som när de föddes, fick barn eller dog.
-
-        ### Varför är verktyget realistiskt och standardinställningarna logiska?
-        Verktyget är realistiskt eftersom det använder SCB:s officiella siffror för alla år fram till 2024, så det matchar exakt vad som hänt i Sverige, som 10,55 miljoner invånare 2023 eller 100 051 födslar samma år. För framtiden bygger det på rimliga antaganden, som att folk lever längre (från 82,3 år för män 2024 till 86 år 2050) och att färre barn föds (1,65 barn per kvinna), vilket stämmer med SCB:s prognoser om sjunkande fertilitet och ökande livslängd.
-
-        Standardinställningarna är logiska och baserade på verkliga trender:
-        - **Fler barn för vissa grupper**: Modellen ger 20% högre chans för barn bland folk från Mellanöstern, vilket matchar SCB:s data där utrikes födda från Asien och Afrika har en fertilitet på cirka 1,7–2,0 barn per kvinna, jämfört med 1,4 för inrikes födda (SCB, 2023). Detta sjunker i andra generationen, vilket modellen också fångar.
-        - **Migrationens utveckling**: Inställningarna speglar historiska mönster, som 30% invandring från Europa 1960–1980 (t.ex. arbetskraftsinvandring från Finland), 40% från Balkan 1981–2000 (flyktingar från Jugoslavien), och 60% från Mellanöstern 2001–2024 (som toppade med 163 000 immigranter 2016, mest från Syrien, enligt SCB). Framtida migration (80 000 per år) ligger nära SCB:s genomsnitt på 100 000 årliga immigranter 2010–2020.
-        - **Integration**: Snabbare integration för folk från Skandinavien (7 gånger snabbare än Mellanöstern) stämmer med forskning, som visar att nordiska invandrare anpassar sig snabbare språkligt och kulturellt (SCB:s integrationsrapporter). "Vändpunkten" (svårare integration om svenskar blir minoritet) är hypotetisk men baserad på studier om sociala spänningar i mångkulturella samhällen.
-
-        Verktyget är alltså trovärdigt för att utforska hur Sverige kan utvecklas, eftersom det kombinerar hårda fakta från SCB med logiska antaganden om framtiden, väl förankrade i statistik och forskning.
+        ### 3. Trovärdighet
+        Modellens styrka ligger i kombinationen av hård data och flexibla antaganden.
+        - **Historisk förankring:** Fram till idag är modellen inte en prognos, utan en **rekonstruktion** som är kalibrerad för att följa den verkliga utvecklingen enligt SCB.
+        - **Källbaserade prognoser:** Standardinställningarna för framtiden är inte godtyckliga, utan baseras på SCB:s officiella befolkningsframskrivning från 2024.
+        - **Transparenta antaganden:** Parametrar som är rena modellantaganden är tydligt markerade som sådana, med förklaringar till logiken bakom dem.
         """)
